@@ -115,6 +115,9 @@ boolean waitForConfigFrame(uint8_t retries) {
         Serial.println(configData.addresses.gwAddr);
         Serial.print(F("ND addr "));
         Serial.println(configData.addresses.nodeAddr);
+      } else if (len == strlen("config_request")) {
+        Serial.println(F("Got config request frame"));
+        Serial.println(receive_payload);
       }
     }
     delay(500);
