@@ -1,3 +1,4 @@
+#include <EEPROM.h>
 #include <SPI.h>
 #include "RF24.h"
 
@@ -32,15 +33,22 @@ typedef struct __attribute__((packed))
   short     sensVal[2];   // Sensor raw values
 } sensorFrame_t;
 
-#define HUMIDITY    0
-#define TEMPERATURE 1
-#define ACT_LED_PIN 9
+#define HUMIDITY            0
+#define TEMPERATURE         1
+#define ACT_LED_PIN         9
+
+#define CONFIG_REQUEST_STR  "config_request"
+#define CONFIG_SET_STR      "config_set"
+
+#define CONFIG_REQUEST      2
+#define CONFIG_SET          1
+#define NO_CONFIG           0
 
 sensorFrame_t sensorData;
 configFrame_t configData;
 char receive_payload[33];
-RF24 radio(7, 8);
 
+RF24 radio(7, 8);
 
 void setup() {
   // Vars, GPIO and general inits
@@ -70,10 +78,14 @@ void setup() {
 
 void loop() {
   Serial.println(F("Welcome to Si7021 RF node"));
-  // Wait for config frame at config default address for about 10 seconds
-  if (waitForConfigFrame(40)) {
-    configProcedure();  // if config frame received, switch to the config procedure
+  // Wait for config frame at config default address for about few seconds
+  byte retConf = waitForConfigFrame(40);
+  if (retConf == CONFIG_REQUEST) {
+    sendConfig(40);
+  } else if (retConf == CONFIG_SET) {
+    waitConfig(40);
   }
+  
 
   // Or continue with normal program (periodicaly send sensor values)
   for (;;) {
@@ -86,7 +98,7 @@ void loop() {
   }
 }
 
-boolean waitForConfigFrame(uint8_t retries) {
+byte waitForConfigFrame(uint8_t retries) {
   for (uint8_t i = 0 ; i < retries ; i++) {
     // Blink LED to inform user
     blinkTimes(1, 100);
@@ -98,10 +110,54 @@ boolean waitForConfigFrame(uint8_t retries) {
       radio.read(receive_payload, len);
       Serial.print(F("Got response size="));
       Serial.print(len);
-      Serial.print(F(" expected size="));
-      Serial.println(sizeof(configFrame_t));
+      
+      if (strcmp(receive_payload, CONFIG_REQUEST_STR) == 0) {
+        // Config request received
+        Serial.println(F("Got config request frame"));
+        return CONFIG_REQUEST;
+      } else if (strcmp(receive_payload, CONFIG_SET_STR) == 0) {
+        // Config set received
+        Serial.println(F("Got config set frame"));
+        return CONFIG_SET;
+      }      
+    }
+    delay(500);
+  }
+}
 
-      if (len == sizeof(configFrame_t)) {
+void sendConfig(uint8_t retries) {
+  // Prepare config frame with node config data
+  configData.header.sensorID[0]  = '0';
+  configData.header.sensorID[1]  = '1';
+  configData.header.swVersion[0] = '0';
+  configData.header.swVersion[1] = '1';
+  configData.header.hwVersion[0] = '0';
+  configData.header.hwVersion[1] = '1';
+ 
+  configData.rfChannel = radio.getChannel();    // RF CHANNEL, in binary
+  configData.rfPower = radio.getPALevel();      // PA, in binary
+  
+  EEPROM.get(0, configData.addresses.gwAddr);
+  EEPROM.get(5, configData.addresses.nodeAddr);
+  radio.stopListening();
+
+  for (uint8_t i = 0 ; i < retries ; i++) {
+    if (!radio.writeFast(&configData, sizeof(configFrame_t))) {   // Write to the FIFO buffers        
+        Serial.println(F("Writefast failed"));
+    }
+
+    if(!radio.txStandBy()) {
+      Serial.println(F("txStandby failed"));
+    }
+
+    delay(500);
+  }
+    
+  radio.startListening();
+}
+
+void waitConfig(uint8_t retries) {
+  /*if (len == sizeof(configFrame_t)) {
         // config frame received
         memcpy(&configData, receive_payload, len);
         Serial.println(F("Data size match"));
@@ -115,17 +171,7 @@ boolean waitForConfigFrame(uint8_t retries) {
         Serial.println(configData.addresses.gwAddr);
         Serial.print(F("ND addr "));
         Serial.println(configData.addresses.nodeAddr);
-      } else if (len == strlen("config_request")) {
-        Serial.println(F("Got config request frame"));
-        Serial.println(receive_payload);
-      }
-    }
-    delay(500);
-  }
-}
-
-void configProcedure() {
-
+      }*/
 }
 
 void blinkTimes(uint8_t blinkTimes, int blinkDelay) {
